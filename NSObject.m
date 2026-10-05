@@ -15,6 +15,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
 #include <malloc/malloc.h>
 
 //#import <libv/libv.h>
@@ -74,10 +76,52 @@ void __CFZombifyNSObject(void) {
 
 static void NSUnrecognizedForwarding() { __asm__("int3"); }
 
+// Darling discovery aid, off by default. With DARLING_TOLERATE_UNRECOGNIZED_SELECTORS set, an
+// unrecognized selector is logged once per class and selector and answered with zero instead of
+// raising, so one run of an application lists every method it reaches that is missing here. Such
+// a run shows what the application calls, never that it works: it has been handed zeros.
+// The default, raising, is unchanged.
+BOOL __NSToleratesUnrecognizedSelectors(void)
+{
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = getenv("DARLING_TOLERATE_UNRECOGNIZED_SELECTORS") != NULL;
+    return enabled;
+}
+
+static BOOL NSTolerateUnrecognizedSelector(Class cls, SEL sel, BOOL isClassMethod)
+{
+    if (!__NSToleratesUnrecognizedSelectors())
+        return NO;
+
+    // ponytail: fixed table, linear scan; past 4096 distinct pairs every call is logged again.
+    static struct { Class cls; SEL sel; } seen[4096];
+    static int count = 0;
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    BOOL known = NO;
+
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < count && !known; i++)
+        known = seen[i].cls == cls && seen[i].sel == sel;
+    if (!known && count < 4096)
+    {
+        seen[count].cls = cls;
+        seen[count].sel = sel;
+        count++;
+    }
+    pthread_mutex_unlock(&lock);
+
+    if (!known)
+        RELEASE_LOG("DARLING unrecognized selector tolerated: %c[%s %s]", isClassMethod ? '+' : '-', class_getName(cls), sel_getName(sel));
+    return YES;
+}
+
 @implementation NSObject (NSObject)
 
 + (void)doesNotRecognizeSelector:(SEL)sel
 {
+    if (NSTolerateUnrecognizedSelector(self, sel, YES))
+        return;
     if (_GETENV(BOOL, "NSUnrecognizedForwardingDisabled"))
     {
         RELEASE_LOG("+[%s %s]: unrecognized selector sent to instance %p; set a breakpoint on NSUnrecognizedForwarding to debug", class_getName(self), sel_getName(sel), self);
@@ -95,6 +139,8 @@ static void NSUnrecognizedForwarding() { __asm__("int3"); }
 
 - (void)doesNotRecognizeSelector:(SEL)sel
 {
+    if (NSTolerateUnrecognizedSelector(object_getClass(self), sel, NO))
+        return;
     if (_GETENV(BOOL, "NSUnrecognizedForwardingDisabled"))
     {
         RELEASE_LOG("+[%s %s]: unrecognized selector sent to instance %p; set a breakpoint on NSUnrecognizedForwarding to debug", object_getClassName(self), sel_getName(sel), self);

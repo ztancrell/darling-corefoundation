@@ -32,6 +32,7 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 
 #import <objc/runtime.h>
 #import <stdio.h>
+#import <string.h>
 
 #import "NSBlockInvocationInternal.h"
 #import "NSInvocationInternal.h"
@@ -43,6 +44,8 @@ along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 )
 
 static void __NSForwardSignatureError() { __builtin_trap(); }
+
+extern BOOL __NSToleratesUnrecognizedSelectors(void);
 
 struct objc_sendv_margs {
     uintptr_t a[4];
@@ -103,6 +106,14 @@ id ___forwarding___(struct objc_sendv_margs *args, void *returnStorage, void *in
         // ...
         // yes, I mean YOU!
         [target doesNotRecognizeSelector:_cmd];
+        if (__NSToleratesUnrecognizedSelectors())
+        {
+            // Discovery mode (see NSObject.m): the call came back instead of raising. Answer
+            // zero in the integer return registers and finish. Floating-point and struct returns
+            // are left as they are; without a signature their shape is unknown.
+            memset(returnStorage, 0, 2 * sizeof(uintptr_t));
+            return nil;
+        }
         return target;
     }
 
