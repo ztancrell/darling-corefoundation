@@ -1230,6 +1230,24 @@ SINGLETON_RR()
     return success;
 }
 
+// Writes an XML property list, atomically. A container holding something that
+// is not a property list type is reported as NSPropertyListWriteStreamError.
+- (BOOL)writeToURL:(NSURL *)url error:(NSError **)error
+{
+    NSData *data = (NSData *)_CFPropertyListCreateXMLData(kCFAllocatorDefault, (CFPropertyListRef)self, true);
+    if (data == nil)
+    {
+        if (error != NULL)
+        {
+            *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSPropertyListWriteStreamError userInfo:nil];
+        }
+        return NO;
+    }
+    BOOL success = [data writeToURL:url options:NSDataWritingAtomic error:error];
+    [data release];
+    return success;
+}
+
 - (void)makeObjectsPerformSelector:(SEL)sel
 {
     [self makeObjectsPerformSelector:sel withObject:nil];

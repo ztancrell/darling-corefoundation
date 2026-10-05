@@ -986,6 +986,24 @@ static NSString *_getDescription(id obj, id locale, int level)
     return success;
 }
 
+// Writes an XML property list, atomically. A container holding something that
+// is not a property list type is reported as NSPropertyListWriteStreamError.
+- (BOOL)writeToURL:(NSURL *)url error:(NSError **)error
+{
+    NSData *data = (NSData *)_CFPropertyListCreateXMLData(kCFAllocatorDefault, (CFPropertyListRef)self, true);
+    if (data == nil)
+    {
+        if (error != NULL)
+        {
+            *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSPropertyListWriteStreamError userInfo:nil];
+        }
+        return NO;
+    }
+    BOOL success = [data writeToURL:url options:NSDataWritingAtomic error:error];
+    [data release];
+    return success;
+}
+
 - (NSArray *)keysSortedByValueUsingSelector:(SEL)comparator
 {
     return [[self allKeys] sortedArrayUsingComparator:^NSComparisonResult(id obj1, id obj2) {
